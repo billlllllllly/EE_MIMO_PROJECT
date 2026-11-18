@@ -42,14 +42,5 @@ class SIC:
 
     def detectSequence(self, received):
         """Input (N_rx,) or (N_samples, N_rx); output (N_tx,) or (N_tx, N_samples)."""
-        self._validate_configuration()
         received = torch.as_tensor(received, dtype=self.CSI.dtype, device=self.CSI.device)
-        if received.ndim not in (1, 2) or received.shape[-1] != self.CSI.shape[0]:
-            raise ValueError("Received input must have shape (N_rx,) or (N_samples, N_rx).")
-        if not torch.isfinite(received).all():
-            raise ValueError("Received input must contain finite values.")
-        if received.ndim == 1:
-            return self._detect_one(received)
-        if received.shape[0] == 0:
-            return received.new_empty((self.CSI.shape[1], 0))
         return torch.stack([self._detect_one(y) for y in received], dim=1)
