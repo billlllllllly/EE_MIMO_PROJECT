@@ -1,4 +1,3 @@
-import math
 import torch
 
 class partialMAP:
@@ -6,9 +5,9 @@ class partialMAP:
         self.csi = None
         self.possibleTXSymbols = None
         self.noiseVar = None
-        self.Q, self.R = None
+        self.Q = self.R = None
         self.bits = None
-        self.M, self.B = None
+        self.M = self.B = None
 
     def updateCSI(self, csi):
         self.csi = torch.as_tensor(csi, dtype=torch.complex128)
@@ -57,12 +56,8 @@ class partialMAP:
                 Sigma_local[1:] += Theta
             Theta = Sigma_local
 
-        hard_bits = (Theta < 0).long()
-        labels = self.bits.to(y.device)
-        matches = (hard_bits[:, None, :] == labels[None, :, :]).all(dim=-1)
-        indices = matches.long().argmax(dim=1)
-        return self.possibleTXSymbols.to(y.device)[indices]
-        
+        return (Theta < 0).long()
+
     def detectSequence(self, recieved):
-        received = torch.as_tensor(received, dtype=self.csi.dtype, device=self.csi.device)
+        received = torch.as_tensor(recieved, dtype=self.csi.dtype, device=self.csi.device)
         return torch.stack([self._detect_one(y) for y in received], dim=1)
