@@ -47,16 +47,14 @@ class partialMAP:
 
     def _detect_one(self, y):
         z = self.Q.mH @ y
-        Theta = None
+        llr = z.real.new_zeros((self.NT, self.B))
 
         for layer in range(self.NT - 1, -1, -1):
-            Sigma_local = self._local_LLR(z[layer], self.R[layer, layer:], layer)
-            if Theta is not None:
-                # The previous layer covers only streams layer+1 through N_tx-1.
-                Sigma_local[1:] += Theta
-            Theta = Sigma_local
+            llr[layer:] += self._local_LLR(
+                z[layer], self.R[layer, layer:], layer
+            )
 
-        return (Theta < 0).long()
+        return (llr < 0).long()
 
     def detectSequence(self, recieved):
         received = torch.as_tensor(recieved, dtype=self.csi.dtype, device=self.csi.device)
