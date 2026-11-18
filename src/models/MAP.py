@@ -1,5 +1,7 @@
 import math
 import torch
+import numpy as np
+from itertools import product
 
 class MAP:
     def __init__(self):
@@ -16,7 +18,8 @@ class MAP:
         self.csi = torch.as_tensor(csi, dtype=torch.complex128)
 
     def updatePossibleTXSymbols(self, s):
-        self.possibleTXSymbols = torch.as_tensor(s, dtype=torch.complex128)
+        symbol_per_antenna = torch.as_tensor(s, dtype=torch.complex128)
+        self.possibleTXSymbols = np.array(list(product(symbol_per_antenna, repeat=4))).T
 
     def _updatePossibleRXSymbols(self):
         self.possibleRXSymbols = self.csi @ self.possibleTXSymbols
