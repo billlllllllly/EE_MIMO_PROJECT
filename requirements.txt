@@ -1,0 +1,10 @@
+# NYCU ray tracing notebooks. Sionna RT also installs Mitsuba and Dr.Jit.
+sionna-rt==2.2.0
+matplotlib
+numpy
+
+# MIMO simulation and detector models.
+torch
+
+# NVIDIA NRX inference (src/models/NvidiaNRX.py).
+onnxruntime
