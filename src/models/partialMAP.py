@@ -1,7 +1,8 @@
 import torch
 
 class partialMAP:
-    def __init__(self):
+    def __init__(self, *, verbose=True):
+        self.verbose = verbose
         self.csi = None
         self.possibleTXSymbols = None
         self.noiseVar = None
@@ -13,10 +14,11 @@ class partialMAP:
         self.csi = torch.as_tensor(csi, dtype=torch.complex128)
         self.NR, self.NT = self.csi.shape
         self.Q, self.R = torch.linalg.qr(self.csi, mode="reduced")
-        print("csi updated:")
-        print("H = ", self.csi)
-        print("Q = ", self.Q)
-        print("R = ", self.R)
+        if self.verbose:
+            print("csi updated:")
+            print("H = ", self.csi)
+            print("Q = ", self.Q)
+            print("R = ", self.R)
 
     def updateNoiseVar(self, noiseVar):
         self.noiseVar = float(noiseVar)
@@ -48,7 +50,8 @@ class partialMAP:
                 log_p1 = torch.logsumexp(scores[mask1], dim=0)
                 Sigma_local[j, b] = log_p0 - log_p1
 
-        print("Sigma local: ", Sigma_local)
+        if self.verbose:
+            print("Sigma local: ", Sigma_local)
         return Sigma_local
 
     def _detect_one(self, y):
@@ -59,10 +62,11 @@ class partialMAP:
             llr[layer:] += self._local_LLR(
                 z[layer], self.R[layer, layer:], layer
             )
-            print(f"currect layer: {layer}")
-            print(f"decoded LLR (Lamda):")
-            print(llr)
-            print("\n")
+            if self.verbose:
+                print(f"currect layer: {layer}")
+                print(f"decoded LLR (Lamda):")
+                print(llr)
+                print("\n")
 
         return (llr < 0).long()
 
