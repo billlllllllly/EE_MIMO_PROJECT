@@ -71,7 +71,7 @@ class Testbench:
         for _, detector in detectors:
             detector.updatePossibleTXSymbols(symbols, labels)
 
-        for i in csi.shape[0]-1:
+        for i in range(0, csi.shape[0]-1, 1):
             channel = csi[i]
             print(f"current running csi[{i}]")
             tx_indices = torch.randint(
