@@ -32,15 +32,19 @@ class MAP:
     def updateNoiseVar(self, noiseVar):
         self.noiseVar = float(noiseVar)
 
-    def _detect_one(self, y):
-        squared_dist = (y[:, None] - self.possibleRXSymbols).abs().square().sum(dim=0)
-        log_prior = 0.0
-        if self.prior is not None:
-            log_prior = self.prior.to(y.device).log()
-        index = (-squared_dist / self.noiseVar + log_prior).argmax()
-        return self.bits.to(y.device)[self.candidateIndices[index]]
-
     def detectSequence(self, received):
         received = torch.as_tensor(received, dtype=self.csi.dtype, device=self.csi.device)
         self._updatePossibleRXSymbols()
-        return torch.stack([self._detect_one(y) for y in received], dim=1)
+        log_prior = 0.0 if self.prior is None else self.prior.to(received.device).log()
+
+        # Bound the temporary sample-by-antenna-by-candidate tensor.
+        batch_size = max(1, 1_048_576 // self.possibleRXSymbols.numel())
+        indices = []
+        for batch in received.split(batch_size):
+            residual = batch.unsqueeze(-1) - self.possibleRXSymbols
+            squared_dist = residual.abs().square().sum(dim=1)
+            scores = -squared_dist / self.noiseVar + log_prior
+            indices.append(scores.argmax(dim=-1))
+
+        candidates = self.candidateIndices[torch.cat(indices)]
+        return self.bits.to(received.device)[candidates].transpose(0, 1)
