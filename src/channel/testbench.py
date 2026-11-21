@@ -7,18 +7,6 @@ import torch
 
 
 class Testbench:
-    """Configure a BER sweep once and run it on any compatible CSI batch.
-
-    ``models`` maps detector names to instances implementing ``updateCSI``,
-    ``updatePossibleTXSymbols``, ``updateNoiseVar``, and ``detectSequence``.
-    ``symbols`` is the shared constellation of shape (M,), and ``bit_labels``
-    contains its corresponding binary labels of shape (M, bits_per_symbol).
-    ``symbols_per_channel`` counts MIMO symbol vectors per CSI matrix. Each
-    vector contains one independently sampled constellation symbol per stream.
-    ``snr_db`` is a sequence of SNR points referenced to unit transmit-symbol
-    energy, so use a unit-average-energy constellation for an Es/N0 sweep.
-    """
-
     def __init__(self, models, symbols, bit_labels, symbols_per_channel, snr_db):
         self.models = dict(models)
         if not self.models:
@@ -51,18 +39,14 @@ class Testbench:
 
     @torch.no_grad()
     def run(self, csi, *, generator=None):
-        """Return (ber, bits_per_snr) for CSI of shape (batch, nr, nt).
-
-        ``ber`` is a tensor of shape (len(snr_db), len(models)), in the input
-        order of the SNR points and detector names. Pass a torch.Generator on
-        the CSI device to reproduce the symbol and AWGN draws.
-        """
         csi = torch.as_tensor(csi, dtype=torch.complex128)
         if csi.ndim != 3 or any(size == 0 for size in csi.shape):
-            raise ValueError("csi must have shape (batch, nr, nt) with positive dimensions.")
-        batch, nr, nt = csi.shape
+            raise ValueError("csi must have shape (batch, NR, NT) with positive dimensions.")
+        batch, NR, NT = csi.shape
         symbols = self.symbols.to(csi.device)
+        # symbols have shape (M,)
         labels = self.bit_labels.to(csi.device)
+        # labels have shape (M, B)
         detectors = tuple(self.models.items())
         errors = torch.zeros(
             (len(self.snr_db), len(detectors)), dtype=torch.long, device=csi.device
@@ -73,24 +57,34 @@ class Testbench:
 
         for i in range(0, csi.shape[0]-1, 1):
             channel = csi[i]
+            # loop through every channel,
+            # channel have shape (NR, NT)
             print(f"current running csi[{i}]")
+
             tx_indices = torch.randint(
-                symbols.numel(), (nt, self.symbols_per_channel),
+                symbols.numel(), (NT, self.symbols_per_channel),
                 device=csi.device, generator=generator,
             )
+            # tx_indices have shape (NT, symbols_per_channel)
             tx_bits = labels[tx_indices]
-            clean = channel @ symbols[tx_indices]
+            # tx_bits have shape (NT, symbols_per_channel, B)
+            tx_symbols = symbols[tx_indices]
+            # tx_symbols have shape (NT, symbols_per_channel)
+            clean_rx_symbols = channel @ tx_symbols
+            # clean_rx_symbols have shape (NR, symbols_per_channel)
+            
             noise = torch.randn(
-                (nr, self.symbols_per_channel), dtype=csi.dtype,
+                clean_rx_symbols.shape, dtype=csi.dtype,
                 device=csi.device, generator=generator,
             )
+            # base noise with unit variance and same shape as rx_symbols
 
             for _, detector in detectors:
                 detector.updateCSI(channel)
 
             for i, variance in enumerate(self.noise_variances):
                 # Complex randn has unit average power. Share samples across detectors and SNRs.
-                received = (clean + math.sqrt(variance) * noise).T
+                received = (clean_rx_symbols + math.sqrt(variance) * noise).T
                 for j, (name, detector) in enumerate(detectors):
                     detector.updateNoiseVar(variance)
                     detected_bits = detector.detectSequence(received)
@@ -101,5 +95,5 @@ class Testbench:
                         )
                     errors[i, j] += (detected_bits != tx_bits).count_nonzero()
 
-        bits_per_snr = batch * nt * self.symbols_per_channel * labels.shape[1]
+        bits_per_snr = batch * NT * self.symbols_per_channel * labels.shape[1]
         return errors.double() / bits_per_snr, bits_per_snr
