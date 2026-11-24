@@ -62,7 +62,7 @@ class Testbench:
             # loop through every channel,
             # channel have shape (NR, NT)
             if (i % (int)(channel_size/100) == 0):
-                print(f"")
+                print(f"running channel number {i}")
 
             tx_indices = torch.randint(
                 symbols.numel(), (NT, self.symbols_per_channel),
