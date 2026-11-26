@@ -1,5 +1,6 @@
 """Monte Carlo BER testbench for batched flat-fading MIMO channels."""
 
+import csv
 import math
 import operator
 
@@ -38,31 +39,28 @@ class Testbench:
             raise ValueError("snr_db must yield finite, positive noise variances.")
 
     @torch.no_grad()
-    def run(self, csi, *, generator=None):
+    def run(self, csi, *, generator=None, csv_path=None):
+        """Return BER and bits per SNR, optionally writing counts by transmit antenna."""
         csi = torch.as_tensor(csi, dtype=torch.complex128)
         if csi.ndim != 3 or any(size == 0 for size in csi.shape):
             raise ValueError("csi must have shape (batch, NR, NT) with positive dimensions.")
-        batch, NR, NT = csi.shape
+        batch, _, NT = csi.shape
         symbols = self.symbols.to(csi.device)
         # symbols have shape (M,)
         labels = self.bit_labels.to(csi.device)
         # labels have shape (M, B)
         detectors = tuple(self.models.items())
         errors = torch.zeros(
-            (len(self.snr_db), len(detectors)), dtype=torch.long, device=csi.device
+            (len(self.snr_db), len(detectors), NT), dtype=torch.long, device=csi.device
         )
 
         for _, detector in detectors:
             detector.updatePossibleTXSymbols(symbols, labels)
 
-        channel_size = csi.shape[0]
-
-        for i in range(0, channel_size-1, 1):
-            channel = csi[i]
-            # loop through every channel,
-            # channel have shape (NR, NT)
-            if (i % (int)(channel_size/100) == 0):
-                print(f"running channel number {i}")
+        progress_interval = max(1, batch // 100)
+        for channel_index, channel in enumerate(csi):
+            if channel_index % progress_interval == 0:
+                print(f"running channel number {channel_index}")
 
             tx_indices = torch.randint(
                 symbols.numel(), (NT, self.symbols_per_channel),
@@ -96,7 +94,18 @@ class Testbench:
                             f"{name} returned bits with shape {tuple(detected_bits.shape)}. "
                             f"Expected {tuple(tx_bits.shape)} (nt, symbols_per_channel, bits_per_symbol)."
                         )
-                    errors[i, j] += (detected_bits != tx_bits).count_nonzero()
+                    errors[i, j] += (detected_bits != tx_bits).count_nonzero(dim=(1, 2))
 
         bits_per_snr = batch * NT * self.symbols_per_channel * labels.shape[1]
-        return errors.double() / bits_per_snr, bits_per_snr
+        if csv_path is not None:
+            self._write_error_csv(csv_path, errors, bits_per_snr)
+        return errors.sum(dim=-1).double() / bits_per_snr, bits_per_snr
+
+    def _write_error_csv(self, csv_path, errors, bits_per_snr):
+        antenna_columns = [f"tx{index}_bit_errors" for index in range(1, errors.shape[-1] + 1)]
+        with open(csv_path, "w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(["snr_db", "detector", *antenna_columns, "total_bits_transmitted"])
+            for snr, detector_counts in zip(self.snr_db, errors.tolist()):
+                for name, antenna_counts in zip(self.models, detector_counts):
+                    writer.writerow([snr, name, *antenna_counts, bits_per_snr])
