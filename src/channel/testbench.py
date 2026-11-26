@@ -39,8 +39,8 @@ class Testbench:
             raise ValueError("snr_db must yield finite, positive noise variances.")
 
     @torch.no_grad()
-    def run(self, csi, *, generator=None, csv_path=None):
-        """Return BER and bits per SNR, optionally writing counts by transmit antenna."""
+    def run(self, csi, *, generator=None, csv_path=None, plot_antenna_ber=False):
+        """Return overall BER and optionally export counts or plot BER by antenna."""
         csi = torch.as_tensor(csi, dtype=torch.complex128)
         if csi.ndim != 3 or any(size == 0 for size in csi.shape):
             raise ValueError("csi must have shape (batch, NR, NT) with positive dimensions.")
@@ -96,10 +96,47 @@ class Testbench:
                         )
                     errors[i, j] += (detected_bits != tx_bits).count_nonzero(dim=(1, 2))
 
-        bits_per_snr = batch * NT * self.symbols_per_channel * labels.shape[1]
+        bits_per_antenna = batch * self.symbols_per_channel * labels.shape[1]
+        bits_per_snr = NT * bits_per_antenna
         if csv_path is not None:
             self._write_error_csv(csv_path, errors, bits_per_snr)
+        if plot_antenna_ber:
+            self._plot_antenna_ber(errors, bits_per_antenna)
         return errors.sum(dim=-1).double() / bits_per_snr, bits_per_snr
+
+    def _plot_antenna_ber(self, errors, bits_per_antenna):
+        import matplotlib.pyplot as plt
+
+        ber = errors.cpu().double() / bits_per_antenna
+        snr_db = torch.tensor(self.snr_db, dtype=torch.float64)
+        one_error_ber = 1 / bits_per_antenna
+
+        for model_index, name in enumerate(self.models):
+            fig, ax = plt.subplots(figsize=(8, 5), layout="constrained")
+            for antenna, points in enumerate(ber[:, model_index].T, start=1):
+                zero = points == 0
+                line, = ax.semilogy(
+                    snr_db, points.masked_fill(zero, torch.nan), "o-", label=f"TX{antenna}"
+                )
+                if zero.any():
+                    ax.scatter(
+                        snr_db[zero], torch.full_like(points[zero], one_error_ber),
+                        marker="v", color=line.get_color(),
+                    )
+
+            ax.set(
+                title=f"{name} · BER by transmit antenna",
+                xlabel="SNR (dB)", ylabel="Bit error rate",
+                ylim=(0.5 * one_error_ber, 1.1),
+            )
+            ax.grid(True, which="both", alpha=0.3)
+            ax.legend()
+            fig.supxlabel(
+                "Downward triangles mark zero observed errors at the one-error BER.",
+                fontsize="small",
+            )
+
+        plt.show()
 
     def _write_error_csv(self, csv_path, errors, bits_per_snr):
         antenna_columns = [f"tx{index}_bit_errors" for index in range(1, errors.shape[-1] + 1)]
