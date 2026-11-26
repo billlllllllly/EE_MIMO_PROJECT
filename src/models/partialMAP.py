@@ -1,8 +1,13 @@
+import csv
+from pathlib import Path
+
 import torch
 
+
 class partialMAP:
-    def __init__(self, *, verbose=True):
+    def __init__(self, *, verbose=True, csv_log_dir=None):
         self.verbose = verbose
+        self.csv_log_dir = Path(csv_log_dir) if csv_log_dir is not None else None
         self.csi = None
         self.possibleTXSymbols = None
         self.noiseVar = None
@@ -56,15 +61,57 @@ class partialMAP:
             print("Sigma local: ", sigma_local)
         return sigma_local
 
+    def _log_layer_csv(self, layer, z, r, local_llr):
+        """Append this layer's inputs and local bit LLRs, one row per sample."""
+        path = self.csv_log_dir / f"layer_{layer}.csv"
+        header = [f"z{layer}_re", f"z{layer}_im"]
+        for tx in range(layer, self.NT):
+            header.extend([f"r{layer}{tx}_re", f"r{layer}{tx}_im"])
+        header.extend(
+            f"llr_tx{tx}_bit{bit}"
+            for tx in range(layer, self.NT)
+            for bit in range(self.B)
+        )
+
+        r_fields = [
+            part
+            for value in r.detach().cpu().tolist()
+            for part in (value.real, value.imag)
+        ]
+        z_values = z.detach().cpu().tolist()
+        llr_values = local_llr.detach().flatten(1).cpu().tolist()
+
+        with path.open("a+", encoding="utf-8", newline="") as csv_file:
+            csv_file.seek(0)
+            existing_header = next(csv.reader(csv_file), None)
+            if existing_header is not None and existing_header != header:
+                raise ValueError(
+                    f"CSV columns do not match the detector configuration: {path}"
+                )
+            csv_file.seek(0, 2)
+            writer = csv.writer(csv_file)
+            if existing_header is None:
+                writer.writerow(header)
+            writer.writerows(
+                [sample.real, sample.imag, *r_fields, *bit_llrs]
+                for sample, bit_llrs in zip(z_values, llr_values)
+            )
+
     def detectSequence(self, recieved):
         received = torch.as_tensor(recieved, dtype=self.csi.dtype, device=self.csi.device)
         z = received @ self.Q.conj()
         llr = z.real.new_zeros((z.shape[0], self.NT, self.B))
 
+        if self.csv_log_dir is not None:
+            self.csv_log_dir.mkdir(parents=True, exist_ok=True)
+
         for layer in range(self.NT - 1, -1, -1):
-            llr[:, layer:] += self._local_LLR(
-                z[:, layer], self.R[layer, layer:], layer
-            )
+            z_layer = z[:, layer]
+            r_layer = self.R[layer, layer:]
+            local_llr = self._local_LLR(z_layer, r_layer, layer)
+            llr[:, layer:] += local_llr
+            if self.csv_log_dir is not None:
+                self._log_layer_csv(layer, z_layer, r_layer, local_llr)
             if self.verbose:
                 print(f"currect layer: {layer}")
                 print(f"decoded LLR (Lamda):")
