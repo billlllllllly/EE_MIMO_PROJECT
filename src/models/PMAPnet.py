@@ -24,6 +24,7 @@ class PMAP_layer(nn.Module):
         modulation_order: int,
         *,
         hidden_layers: int,
+        hidden_width_multiplier: int = 1,
     ) -> None:
         super().__init__()
         if remaining_streams < 1:
@@ -32,10 +33,13 @@ class PMAP_layer(nn.Module):
             raise ValueError("modulation_order must be a power of two of at least 2.")
         if hidden_layers < 1:
             raise ValueError("hidden_layers must be positive.")
+        if hidden_width_multiplier < 1:
+            raise ValueError("hidden_width_multiplier must be positive.")
 
         bits_per_symbol = modulation_order.bit_length() - 1
-        hidden_size = remaining_streams * modulation_order + 1  # Table III
-        self.input_size = 2 * hidden_size
+        base_width = remaining_streams * modulation_order + 1  # Table III
+        hidden_size = base_width * hidden_width_multiplier
+        self.input_size = 2 * base_width
         self.output_size = remaining_streams * bits_per_symbol
 
         layers: list[nn.Module] = [nn.Linear(self.input_size, hidden_size), nn.ReLU()]
@@ -54,18 +58,28 @@ class PMAPNet(nn.Module):
     Supply one prepared feature tensor per row, in order from the first row
     (all streams) to the last (one stream). Outputs follow the same order.
     The paper leaves the simulation depth unspecified, so hidden_layers is
-    an explicit argument.
+    an explicit argument. hidden_width_multiplier scales the Table III widths.
     """
 
     def __init__(
-        self, num_tx: int, modulation_order: int, *, hidden_layers: int
+        self,
+        num_tx: int,
+        modulation_order: int,
+        *,
+        hidden_layers: int,
+        hidden_width_multiplier: int = 1,
     ) -> None:
         super().__init__()
         if num_tx < 1:
             raise ValueError("num_tx must be positive.")
 
         self.layer_networks = nn.ModuleList(
-            PMAP_layer(remaining_streams, modulation_order, hidden_layers=hidden_layers)
+            PMAP_layer(
+                remaining_streams,
+                modulation_order,
+                hidden_layers=hidden_layers,
+                hidden_width_multiplier=hidden_width_multiplier,
+            )
             for remaining_streams in range(num_tx, 0, -1)
         )
 

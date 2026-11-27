@@ -224,6 +224,10 @@ def parse_args(argv=None):
     parser.add_argument(
         "--hidden-layers", type=int, default=2, help="Depth used in Eq. (36)'s example."
     )
+    parser.add_argument(
+        "--hidden-width-multiplier", type=int, default=1,
+        help="Multiply the hidden widths from Table III by this integer.",
+    )
     parser.add_argument("--train-samples", type=int, default=20_000)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=100)
@@ -238,6 +242,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if min(args.num_tx, args.train_samples, args.epochs, args.batch_size, args.hidden_layers) < 1:
         parser.error("Transmit streams, sample count, epochs, batch size, and depth must be positive.")
+    if args.hidden_width_multiplier < 1:
+        parser.error("Hidden width multiplier must be positive.")
     if not math.isfinite(args.learning_rate) or args.learning_rate <= 0:
         parser.error("Learning rate must be finite and positive.")
     if not 0 <= args.seed < 2**64 - 1:
@@ -263,6 +269,7 @@ def main(argv=None) -> Path:
         "num_tx": args.num_tx,
         "modulation_order": len(constellation),
         "hidden_layers": args.hidden_layers,
+        "hidden_width_multiplier": args.hidden_width_multiplier,
     }
     model = PMAPNet(**model_kwargs).to(device)
     print(
