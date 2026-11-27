@@ -5,6 +5,7 @@ numpy
 
 # MIMO simulation and detector models.
 torch
+filelock
 
 # # NVIDIA NRX inference (src/models/NvidiaNRX.py).
 # onnxruntime
